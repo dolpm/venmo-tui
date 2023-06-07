@@ -29,9 +29,16 @@ async fn main() -> io::Result<()> {
     let mut term = Terminal::new(backend)?;
 
     if !logged_in {
-        let _login_resp = draw_login_page(&mut term, &mut api)
-            .await?
-            .expect("failed to login todo UI error");
+        if let None = draw_login_page(&mut term, &mut api).await? {
+            disable_raw_mode()?;
+            crossterm::execute!(
+                term.backend_mut(),
+                LeaveAlternateScreen,
+                DisableMouseCapture
+            )?;
+            term.show_cursor()?;
+            return Ok(());
+        }
     }
 
     // load identity before drawing home page
