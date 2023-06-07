@@ -54,22 +54,19 @@ impl<'a> StoriesPage<'a> {
     }
 
     pub async fn load_more_items(&mut self) {
-        let i = self.state.selected();
-        if (i.is_some() && i.unwrap() >= self.items.len() - 1) || self.loading {
-            // load more items
-            let stories_data = self
-                .api
-                .get_recents(LOAD_SIZE, self.last.as_deref())
-                .await
-                .expect("failed to get story data");
+        // load more items
+        let stories_data = self
+            .api
+            .get_recents(LOAD_SIZE, self.last.as_deref())
+            .await
+            .expect("failed to get story data");
 
-            self.items.pop();
+        self.items.pop();
 
-            self.items
-                .append(&mut Self::create_table_rows(stories_data.stories));
+        self.items
+            .append(&mut Self::create_table_rows(stories_data.stories));
 
-            self.items.push(vec!["Load more :)".to_string()]);
-        }
+        self.items.push(vec!["Load more :)".to_string()]);
     }
 
     pub fn next(&mut self) {
@@ -109,7 +106,15 @@ impl<'a> Page for StoriesPage<'a> {
             Input { key: Key::Up, .. } => self.previous(),
             Input {
                 key: Key::Enter, ..
-            } => self.load_more_items().await,
+            } => {
+                if let Some(i) = self.state.selected() {
+                    let len = self.items.len();
+                    if i >= len - 1 {
+                        self.loading = true;
+                        self.items[len - 1][0] = "Loading...".to_string();
+                    }
+                }
+            }
             _ => {}
         }
         false
