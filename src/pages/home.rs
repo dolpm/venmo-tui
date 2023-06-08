@@ -213,7 +213,15 @@ pub async fn draw_home_page(
                 _ => {}
             },
             FocusedArea::MainWindow => {
-                let event = crossterm::event::read()?.into();
+                let event: Input = crossterm::event::read()?.into();
+
+                if let Some(_selected) = side_bar.items.state.selected() {
+                    if let Some(ref mut p) = &mut current_page {
+                        if !p.on_input_event(event.clone()).await {
+                            continue;
+                        };
+                    }
+                }
 
                 // if escape, exit
                 // if left, go back to side bar
@@ -224,14 +232,6 @@ pub async fn draw_home_page(
                     }
                     _ => {}
                 };
-
-                if let Some(_selected) = side_bar.items.state.selected() {
-                    if let Some(ref mut p) = &mut current_page {
-                        if p.on_input_event(event).await {
-                            break 'outer;
-                        };
-                    }
-                }
             }
         }
     }

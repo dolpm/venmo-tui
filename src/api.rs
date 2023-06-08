@@ -35,11 +35,63 @@ pub struct ProfileQuery<'a> {
     query: &'a str,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Audience {
+    Private,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetUserDetails<'a> {
+    user_id: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaymentType {
+    Pay,
+    Request,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentQuery<'a> {
+    amount_in_cents: u32,
+    audience: Audience,
+    note: &'a str,
+    target_user_details: TargetUserDetails<'a>,
+    #[serde(rename = "type")]
+    payment_type: PaymentType,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserVariablesName<'a> {
+    name: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserVariables<'a> {
+    input: UserVariablesName<'a>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserQuery<'a> {
+    operation_name: &'a str,
+    variables: UserVariables<'a>,
+    query: &'a str,
+}
+
 #[derive(Debug)]
 pub enum ApiError {
     LoginFailure(String),
     Unauthaurized(String),
     LogoutFailure(String),
+    PaymentSendFailure(String),
+    UserQueryFailure(String),
 }
 
 impl fmt::Display for ApiError {
@@ -48,6 +100,12 @@ impl fmt::Display for ApiError {
             ApiError::LoginFailure(e) => write!(f, "login failed! please retry... {e}"),
             ApiError::Unauthaurized(e) => write!(f, "unauthorized! {e}"),
             ApiError::LogoutFailure(e) => write!(f, "logout failed! please retry... {e}"),
+            ApiError::PaymentSendFailure(e) => {
+                write!(f, "payment request failed! please retry... {e}")
+            }
+            ApiError::UserQueryFailure(e) => {
+                write!(f, "failed to query user! please retry... {e}")
+            }
         }
     }
 }
@@ -362,6 +420,174 @@ impl Api {
             ));
         }
         self.db.clear().expect("failed to clear db");
+        Ok(())
+    }
+
+    pub async fn fetch_user_id(&mut self, query: &str) -> Result<String, ApiError> {
+        let user_query = r#"
+        query People(
+            $input: SearchInput!
+            $businessesInput: PaginatedInput
+            $peopleInput: PaginatedInput
+            $charitiesInput: PaginatedInput
+          ) {
+            search(input: $input) {
+              businesses(input: $businessesInput) {
+                edges {
+                  node {
+                    ...BusinessesFragment
+                    avatar {
+                      url
+                      __typename
+                    }
+                    __typename
+                  }
+                  cursor
+                  __typename
+                }
+                pageInfo {
+                  ...PaginationFragment
+                  __typename
+                }
+                __typename
+              }
+              charities(input: $charitiesInput) {
+                edges {
+                  node {
+                    ...CharityFragment
+                    avatar {
+                      url
+                      __typename
+                    }
+                    __typename
+                  }
+                  cursor
+                  __typename
+                }
+                pageInfo {
+                  ...PaginationFragment
+                  __typename
+                }
+                __typename
+              }
+              people(input: $peopleInput) {
+                edges {
+                  node {
+                    displayName
+                    id
+                    type
+                    avatar {
+                      url
+                      __typename
+                    }
+                    handle
+                    firstName
+                    lastName
+                    isFriend
+                    __typename
+                  }
+                  cursor
+                  __typename
+                }
+                pageInfo {
+                  ...PaginationFragment
+                  __typename
+                }
+                __typename
+              }
+              __typename
+            }
+          }
+          fragment PaginationFragment on PageInfo {
+            startCursor
+            endCursor
+            hasNextPage
+            hasPreviousPage
+            __typename
+          }
+          fragment BusinessesFragment on BusinessSearchResult {
+            displayName
+            id
+            type
+            handle
+            mutualFriends
+            paymentInteractions
+            isFriend
+            isFavorite
+            __typename
+          }
+          fragment CharityFragment on CharitiesSearchResult {
+            displayName
+            id
+            type
+            handle
+            mutualFriends
+            paymentInteractions
+            isFriend
+            isFavorite
+            __typename
+          }          
+        "#;
+
+        let id = match self
+            .client
+            .post("https://api.venmo.com/graphql")
+            .header("Host", "api.venmo.com")
+            .header("accept", "*/*")
+            .header("content-type", "application/json")
+            .bearer_auth(&self.bearer)
+            .json(&UserQuery {
+                operation_name: "People",
+                variables: UserVariables {
+                    input: UserVariablesName { name: query },
+                },
+                query: user_query,
+            })
+            .send()
+            .await
+        {
+            Err(e) => {
+                return Err(ApiError::UserQueryFailure(e.to_string()));
+            }
+            Ok(resp) => serde_json::from_value::<String>(
+                resp.json::<serde_json::Value>()
+                    .await
+                    .expect("failed to parse")["data"]["search"]["people"]["edges"][0]["node"]
+                    ["id"]
+                    .clone(),
+            )
+            .expect("failed to parse"),
+        };
+
+        Ok(id)
+    }
+
+    pub async fn submit_payment<'a>(
+        &mut self,
+        amount_in_cents: u32,
+        note: &'a str,
+        user_id: &'a str,
+        payment_type: PaymentType,
+    ) -> Result<(), ApiError> {
+        if let Err(_) = self
+            .client
+            .post("https://account.venmo.com/api/payments")
+            .header("content-type", "application/json")
+            .header("csrf-token", &self.csrf)
+            .header("xsrf-token", &self.csrf)
+            .json(&PaymentQuery {
+                amount_in_cents,
+                audience: Audience::Private,
+                note,
+                target_user_details: TargetUserDetails { user_id },
+                payment_type,
+            })
+            .send()
+            .await
+        {
+            return Err(ApiError::PaymentSendFailure("oops!".to_string()));
+        }
+
         Ok(())
     }
 }

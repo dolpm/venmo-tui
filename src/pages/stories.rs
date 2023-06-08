@@ -96,6 +96,10 @@ impl<'a> StoriesPage<'a> {
         };
         self.state.select(Some(i));
     }
+
+    pub fn unselect(&mut self) {
+        self.state.select(None);
+    }
 }
 
 #[async_trait]
@@ -114,6 +118,10 @@ impl<'a> Page for StoriesPage<'a> {
                         self.items[len - 1][0] = "Loading...".to_string();
                     }
                 }
+            }
+            Input { key: Key::Left, .. } | Input { key: Key::Esc, .. } => {
+                self.unselect();
+                return true;
             }
             _ => {}
         }
