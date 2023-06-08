@@ -549,14 +549,24 @@ impl Api {
             Err(e) => {
                 return Err(ApiError::UserQueryFailure(e.to_string()));
             }
-            Ok(resp) => serde_json::from_value::<String>(
-                resp.json::<serde_json::Value>()
-                    .await
-                    .expect("failed to parse")["data"]["search"]["people"]["edges"][0]["node"]
-                    ["id"]
-                    .clone(),
-            )
-            .expect("failed to parse"),
+            Ok(resp) => {
+                let parsed = resp.json::<serde_json::Value>().await;
+
+                if let Err(e) = parsed {
+                    return Err(ApiError::UserQueryFailure(e.to_string()));
+                }
+
+                let id =
+                    parsed.unwrap()["data"]["search"]["people"]["edges"][0]["node"]["id"].clone();
+
+                let id_as_str = serde_json::from_value::<String>(id);
+
+                if let Err(e) = id_as_str {
+                    return Err(ApiError::UserQueryFailure(e.to_string()));
+                }
+
+                id_as_str.unwrap()
+            }
         };
 
         Ok(id)

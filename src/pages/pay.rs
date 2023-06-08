@@ -51,11 +51,8 @@ impl<'a> PayPage<'a> {
 
         v.amount
             .set_block(Block::default().borders(Borders::ALL).title("$"));
-        v.handle.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Name, @username, email, phone"),
-        );
+        v.handle
+            .set_block(Block::default().borders(Borders::ALL).title("Username"));
         v.note
             .set_block(Block::default().borders(Borders::ALL).title("Note"));
 
@@ -64,6 +61,34 @@ impl<'a> PayPage<'a> {
         inactivate(&mut v.note);
 
         v
+    }
+
+    fn validate_amount(&mut self) {
+        if let Err(_) = self.amount.lines()[0].parse::<f64>() {
+            self.amount.set_style(Style::default().fg(Color::LightRed));
+            self.amount.set_block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("ERROR: provided value must be a number"),
+            );
+        } else {
+            self.amount.set_style(Style::default().fg(Color::Blue));
+            self.amount
+                .set_block(Block::default().borders(Borders::ALL).title("$"));
+        }
+    }
+
+    async fn validate_username(&mut self) {
+        if let Err(_) = self.api.fetch_user_id(&self.handle.lines()[0]).await {
+            self.handle.set_style(Style::default().fg(Color::LightRed));
+            self.handle.set_block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("ERROR: username not valid"),
+            );
+        } else {
+            inactivate(&mut self.handle);
+        }
     }
 }
 
@@ -80,6 +105,7 @@ impl<'a> Page for PayPage<'a> {
                     }
                     Field::Handle => {
                         inactivate(&mut self.handle);
+                        self.validate_username().await;
                         activate(&mut self.note);
                         Field::Note
                     }
@@ -99,6 +125,7 @@ impl<'a> Page for PayPage<'a> {
                 self.selected = match self.selected {
                     Field::Handle => {
                         inactivate(&mut self.handle);
+                        self.validate_username().await;
                         activate(&mut self.amount);
                         Field::Amount
                     }
@@ -107,7 +134,13 @@ impl<'a> Page for PayPage<'a> {
                         activate(&mut self.handle);
                         Field::Handle
                     }
-                    Field::Pay | Field::Request => {
+                    Field::Pay => {
+                        self.send = self.send.clone().style(Style::default());
+                        activate(&mut self.note);
+                        Field::Note
+                    }
+                    Field::Request => {
+                        self.recv = self.recv.clone().style(Style::default());
                         activate(&mut self.note);
                         Field::Note
                     }
@@ -176,6 +209,7 @@ impl<'a> Page for PayPage<'a> {
                     }
                     Field::Handle => {
                         inactivate(&mut self.handle);
+                        self.validate_username().await;
                         activate(&mut self.note);
                         Field::Note
                     }
@@ -183,14 +217,19 @@ impl<'a> Page for PayPage<'a> {
                 }
             }
             Input { key: Key::Esc, .. } => return true,
-            k => {
-                let _ = match self.selected {
-                    Field::Amount => self.amount.input(k.clone()),
-                    Field::Handle => self.handle.input(k.clone()),
-                    Field::Note => self.note.input(k.clone()),
-                    _ => false,
-                };
-            }
+            k => match self.selected {
+                Field::Amount => {
+                    self.amount.input(k.clone());
+                    self.validate_amount();
+                }
+                Field::Handle => {
+                    self.handle.input(k.clone());
+                }
+                Field::Note => {
+                    self.note.input(k.clone());
+                }
+                _ => {}
+            },
         }
 
         self.selected == Field::Unset
@@ -202,10 +241,10 @@ impl<'a> Page for PayPage<'a> {
         }
 
         if self.waiting_for_submit {
-            let amount_in_cents = self.amount.lines()[0]
-                .parse::<u32>()
+            let amount_in_cents = (self.amount.lines()[0]
+                .parse::<f32>()
                 .expect("failed to parse to u32")
-                * 100;
+                * 100.0) as u32;
 
             let user_id = self
                 .api
