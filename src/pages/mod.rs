@@ -13,6 +13,7 @@ use tui_textarea::{Input, TextArea};
 pub mod home;
 pub mod login;
 pub mod me;
+pub mod pay;
 pub mod qr;
 pub mod stories;
 

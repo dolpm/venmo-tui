@@ -89,8 +89,6 @@ pub fn generate(input: &str) -> Canvas<impl Fn(&mut Context)> {
         qrcode_generator::to_matrix(input, qrcode_generator::QrCodeEcc::Low).unwrap(),
     ));
 
-    qrcode_generator::to_png_to_file(input, qrcode_generator::QrCodeEcc::Low, 200, "out").unwrap();
-
     let mut code = QrCode { data: data.clone() };
     code.add_margin();
     code.grow(4);
@@ -98,7 +96,7 @@ pub fn generate(input: &str) -> Canvas<impl Fn(&mut Context)> {
     let size = code.data.len() as f64;
 
     Canvas::default()
-        .block(Block::default().borders(Borders::ALL).title("My QR"))
+        .block(Block::default().borders(Borders::ALL).title("Venmo me!"))
         .x_bounds([-size, size])
         .y_bounds([-size, size])
         .paint(move |ctx| {

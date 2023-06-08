@@ -28,13 +28,13 @@ enum IdentityType {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UserBalance {
-    value: u32,
+    pub value: u32,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Balance {
-    user_balance: UserBalance,
+    pub user_balance: UserBalance,
 }
 
 #[derive(Deserialize, Debug, Clone)]

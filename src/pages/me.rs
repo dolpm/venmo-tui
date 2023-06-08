@@ -1,24 +1,27 @@
 use std::io::StdoutLock;
 
 use async_trait::async_trait;
-use tui::{backend::CrosstermBackend, layout::Rect, Frame};
+use tui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Span, Spans},
+    widgets::{Block, Borders, Paragraph, BorderType},
+    Frame,
+};
 use tui_textarea::Input;
 
 use crate::api::Api;
 
-use super::{qr, Page};
+use super::{pay::PayPage, qr, Page};
 
 pub struct MePage<'a> {
-    first_name: &'a str,
-    handle: &'a str,
+    api: &'a mut Api,
 }
 
 impl<'a> MePage<'a> {
     pub fn new(api: &'a mut Api) -> Self {
-        Self {
-            handle: &api.identity.as_ref().unwrap().handle,
-            first_name: &api.identity.as_ref().unwrap().display_name,
-        }
+        Self { api }
     }
 }
 
@@ -32,8 +35,58 @@ impl<'a> Page for MePage<'a> {
     }
 
     fn render(&mut self, f: &mut Frame<CrosstermBackend<StdoutLock>>, area: Rect) {
-        let uri = format!("https://account.venmo.com/u/{}", self.handle);
+        let inner_layout = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(60), Constraint::Length(30)].as_ref())
+            .split(area);
+
+        {
+            let left_layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(6), Constraint::Min(10)].as_ref())
+                .split(inner_layout[0]);
+
+            let text = Paragraph::new(vec![
+                Spans::from(Span::styled(
+                    format!("{}", self.api.identity.as_ref().unwrap().display_name),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+                Spans::from(Span::styled(
+                    format!("@{}", self.api.identity.as_ref().unwrap().handle),
+                    Style::default(),
+                )),
+                Spans::from(Span::styled("", Style::default())),
+                Spans::from(Span::styled(
+                    format!(
+                        "Balance: ${}",
+                        self.api
+                            .identity
+                            .as_ref()
+                            .unwrap()
+                            .balance
+                            .user_balance
+                            .value
+                    ),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )),
+            ])
+            .block(Block::default().borders(Borders::ALL).border_type(BorderType::Double))
+            .alignment(tui::layout::Alignment::Center);
+
+            f.render_widget(text, left_layout[0]);
+
+            let mut payment = PayPage::new(self.api);
+
+            payment.render(f, left_layout[1]);
+
+        }
+
+        let uri = format!(
+            "https://account.venmo.com/u/{}",
+            self.api.identity.as_ref().unwrap().handle
+        );
         let canvas = qr::generate(&uri);
-        f.render_widget(canvas, area);
+
+        f.render_widget(canvas, inner_layout[1]);
     }
 }

@@ -2,22 +2,17 @@ use std::io::{self, StdoutLock};
 
 use tui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::Spans,
-    widgets::{Block, Borders, List, ListItem, ListState},
+    text::{Span, Spans},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Terminal,
 };
 use tui_textarea::{Input, Key};
 
 use crate::{api::Api, types::LoginResponse};
 
-use super::{me::MePage, stories::StoriesPage, Page};
-
-enum Selected {
-    SideBar,
-    MainWindow,
-}
+use super::{me::MePage, stories::StoriesPage, Page, ASCII_TITLE};
 
 struct StatefulList<T> {
     state: ListState,
@@ -67,24 +62,22 @@ impl<T> StatefulList<T> {
 }
 
 enum CurrentPage {
-    Me,
+    Home,
     Transactions,
-    PayAndRequest,
     Logout,
 }
 
 impl Default for CurrentPage {
     fn default() -> Self {
-        CurrentPage::Me
+        CurrentPage::Home
     }
 }
 
 impl ToString for CurrentPage {
     fn to_string(&self) -> String {
         match self {
-            CurrentPage::Me => "Me",
+            CurrentPage::Home => "Home",
             CurrentPage::Transactions => "Transactions",
-            CurrentPage::PayAndRequest => "PayAndRequest",
             CurrentPage::Logout => "Logout",
         }
         .to_string()
@@ -99,9 +92,8 @@ impl<'a> SideBar<'a> {
     fn new() -> SideBar<'a> {
         SideBar {
             items: StatefulList::with_items(vec![
-                ("Me", CurrentPage::Me),
+                ("Home", CurrentPage::Home),
                 ("Transactions", CurrentPage::Transactions),
-                ("Pay/Request", CurrentPage::PayAndRequest),
                 ("Logout", CurrentPage::Logout),
             ]),
         }
@@ -123,6 +115,21 @@ pub async fn draw_home_page(
     let (mut assoc_index, mut current_page): (usize, Option<Box<dyn Page>>) =
         (0, Some(Box::new(MePage::new(api))));
 
+    let venmo_text_big = Paragraph::new(
+        ASCII_TITLE
+            .lines()
+            .skip(1)
+            .map(|l| Spans::from(Span::styled(l, Style::default())))
+            .collect::<Vec<_>>(),
+    )
+    .style(Style::default().fg(Color::Blue))
+    .block(Block::default())
+    .alignment(Alignment::Left);
+
+    let outer_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(8), Constraint::Min(8)].as_ref());
+
     let layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(10), Constraint::Percentage(90)].as_ref());
@@ -139,9 +146,8 @@ pub async fn draw_home_page(
             if selected != assoc_index {
                 drop(current_page);
                 current_page = match side_bar.items.items[selected].1 {
-                    CurrentPage::Me => Some(Box::new(MePage::new(api))),
+                    CurrentPage::Home => Some(Box::new(MePage::new(api))),
                     CurrentPage::Transactions => Some(Box::new(StoriesPage::new(api))),
-                    CurrentPage::PayAndRequest => None,
                     CurrentPage::Logout => None,
                 };
                 assoc_index = selected;
@@ -149,7 +155,11 @@ pub async fn draw_home_page(
         }
 
         term.draw(|f| {
-            let chunks = layout.split(f.size());
+            let outer_chunks = outer_layout.split(f.size());
+
+            f.render_widget(venmo_text_big.clone(), outer_chunks[0]);
+
+            let chunks = layout.split(outer_chunks[1]);
 
             {
                 // Create a List from all list items and highlight the currently selected one
