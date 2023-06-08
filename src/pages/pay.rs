@@ -166,8 +166,23 @@ impl<'a> Page for PayPage<'a> {
                 self.waiting_for_submit = match self.selected {
                     Field::Pay | Field::Request => true,
                     _ => false,
+                };
+
+                self.selected = match self.selected {
+                    Field::Amount => {
+                        inactivate(&mut self.amount);
+                        activate(&mut self.handle);
+                        Field::Handle
+                    }
+                    Field::Handle => {
+                        inactivate(&mut self.handle);
+                        activate(&mut self.note);
+                        Field::Note
+                    }
+                    f => f,
                 }
             }
+            Input { key: Key::Esc, .. } => return true,
             k => {
                 let _ = match self.selected {
                     Field::Amount => self.amount.input(k.clone()),
