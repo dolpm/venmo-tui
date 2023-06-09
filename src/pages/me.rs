@@ -18,7 +18,7 @@ use super::{pay::PayPage, qr, Page};
 pub struct MePage<'a> {
     display_name: String,
     handle: String,
-    balance: u32,
+    balance: f32,
     pay_page: PayPage<'a>,
 }
 

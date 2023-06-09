@@ -28,7 +28,7 @@ enum IdentityType {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct UserBalance {
-    pub value: u32,
+    pub value: f32,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -125,3 +125,30 @@ pub struct StoriesResponse {
     pub next_id: String,
     pub stories: Vec<Story>,
 }
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum PayRequestResponseStatus {
+    Pending,
+    Settled,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct PayRequestResponse {
+    pub balance: String,
+    pub status: PayRequestResponseStatus,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct FundingInstrument {
+    pub id: String,
+    pub name: String,
+}
+
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Eligibility {
+    pub eligibile: bool,
+    pub eligibility_token: Option<String>,
+}
+

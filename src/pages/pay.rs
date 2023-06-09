@@ -6,14 +6,14 @@ use tui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::Text,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 use tui_textarea::{Input, Key, TextArea};
 
-use crate::api::Api;
+use crate::{api::Api, types::FundingInstrument};
 
-use super::{activate, inactivate, Page};
+use super::{activate, centered_rect, inactivate, Page};
 
 #[derive(Copy, Clone, PartialEq)]
 enum Field {
@@ -28,11 +28,13 @@ enum Field {
 pub struct PayPage<'a> {
     selected: Field,
     waiting_for_submit: bool,
+    show_popup: bool,
     amount: TextArea<'a>,
     handle: TextArea<'a>,
     note: TextArea<'a>,
     send: Paragraph<'a>,
     recv: Paragraph<'a>,
+    funding_instruments: Vec<FundingInstrument>,
     api: &'a mut Api,
 }
 
@@ -45,7 +47,9 @@ impl<'a> PayPage<'a> {
             note: TextArea::default(),
             send: Paragraph::new(Text::from("Pay")).alignment(Alignment::Right),
             recv: Paragraph::new(Text::from("Request")).alignment(Alignment::Left),
+            funding_instruments: vec![],
             waiting_for_submit: false,
+            show_popup: false,
             selected: Field::Unset,
         };
 
@@ -89,6 +93,20 @@ impl<'a> PayPage<'a> {
         } else {
             inactivate(&mut self.handle);
         }
+    }
+
+    fn render_payment_source_popup(
+        &mut self,
+        f: &mut Frame<'_, CrosstermBackend<StdoutLock<'_>>>,
+        area: Rect,
+    ) {
+        let block = Block::default()
+            .title("Funding Source")
+            .borders(Borders::ALL)
+            .style(Style::default().bg(Color::White));
+        let area = centered_rect(20, 40, area);
+        f.render_widget(Clear, area); //this clears out the background
+        f.render_widget(block, area);
     }
 }
 
@@ -196,10 +214,15 @@ impl<'a> Page for PayPage<'a> {
             Input {
                 key: Key::Enter, ..
             } => {
-                self.waiting_for_submit = match self.selected {
-                    Field::Pay | Field::Request => true,
-                    _ => false,
-                };
+                if self.selected == Field::Request && self.waiting_for_submit == false {
+                    self.waiting_for_submit = true;
+                }
+
+                if self.selected == Field::Pay {
+                    self.funding_instruments =
+                        self.api.get_funding_instruments().await.expect(":(");
+                    self.show_popup = true;
+                }
 
                 self.selected = match self.selected {
                     Field::Amount => {
@@ -213,10 +236,22 @@ impl<'a> Page for PayPage<'a> {
                         activate(&mut self.note);
                         Field::Note
                     }
+
                     f => f,
                 }
             }
-            Input { key: Key::Esc, .. } => return true,
+            Input { key: Key::Esc, .. } => match self.selected {
+                Field::Pay => {
+                    if self.show_popup {
+                        self.show_popup = false;
+                    } else {
+                        return true;
+                    }
+                }
+                _ => {
+                    return true;
+                }
+            },
             k => match self.selected {
                 Field::Amount => {
                     self.amount.input(k.clone());
@@ -228,6 +263,7 @@ impl<'a> Page for PayPage<'a> {
                 Field::Note => {
                     self.note.input(k.clone());
                 }
+
                 _ => {}
             },
         }
@@ -252,6 +288,8 @@ impl<'a> Page for PayPage<'a> {
                 .await
                 .expect("don't fail rn");
 
+            let instrument = None;
+
             self.api
                 .submit_payment(
                     amount_in_cents,
@@ -262,6 +300,7 @@ impl<'a> Page for PayPage<'a> {
                         Field::Request => crate::api::PaymentType::Request,
                         _ => panic!("not possible!"),
                     },
+                    instrument,
                 )
                 .await
                 .expect("don't fail rn");
@@ -316,5 +355,9 @@ impl<'a> Page for PayPage<'a> {
             .title("Pay & Request")
             .borders(Borders::ALL);
         f.render_widget(block, area);
+
+        if self.show_popup {
+            self.render_payment_source_popup(f, area);
+        }
     }
 }

@@ -5,7 +5,9 @@ use regex::Regex;
 use reqwest::{cookie::Jar, Url};
 use serde::Serialize;
 
-use crate::types::{Identity, LoginResponse, StoriesResponse};
+use crate::types::{
+    Eligibility, FundingInstrument, Identity, LoginResponse, PayRequestResponse, StoriesResponse,
+};
 
 pub struct Api {
     client: reqwest::Client,
@@ -25,17 +27,6 @@ struct LoginQuery<'a> {
 }
 
 #[derive(Serialize)]
-struct __Variables {}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProfileQuery<'a> {
-    operation_name: &'a str,
-    variables: __Variables,
-    query: &'a str,
-}
-
-#[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Audience {
     Private,
@@ -47,7 +38,7 @@ pub struct TargetUserDetails<'a> {
     user_id: &'a str,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum PaymentType {
     Pay,
@@ -63,6 +54,11 @@ pub struct PaymentQuery<'a> {
     target_user_details: TargetUserDetails<'a>,
     #[serde(rename = "type")]
     payment_type: PaymentType,
+    #[serde(default)]
+    eligibility_token: Option<String>,
+    #[serde(default)]
+    #[serde(rename = "fundingSourceID")]
+    funding_source_id: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -73,16 +69,27 @@ pub struct UserVariablesName<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UserVariables<'a> {
+pub struct Variables<'a> {
     input: UserVariablesName<'a>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UserQuery<'a> {
+pub struct GqlQuery<'a> {
     operation_name: &'a str,
-    variables: UserVariables<'a>,
+    #[serde(default)]
+    variables: Option<Variables<'a>>,
     query: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EligibilityQuery<'a> {
+    action: &'a str,
+    amount_in_cents: u32,
+    note: &'a str,
+    target_id: &'a str,
+    target_type: &'a str,
 }
 
 #[derive(Debug)]
@@ -324,9 +331,9 @@ impl Api {
             .header("accept", "*/*")
             .header("content-type", "application/json")
             .bearer_auth(&self.bearer)
-            .json(&ProfileQuery {
+            .json(&GqlQuery {
                 operation_name: "Identity",
-                variables: __Variables {},
+                variables: None,
                 query: profile_query,
             })
             .send()
@@ -536,11 +543,11 @@ impl Api {
             .header("accept", "*/*")
             .header("content-type", "application/json")
             .bearer_auth(&self.bearer)
-            .json(&UserQuery {
+            .json(&GqlQuery {
                 operation_name: "People",
-                variables: UserVariables {
+                variables: Some(Variables {
                     input: UserVariablesName { name: query },
-                },
+                }),
                 query: user_query,
             })
             .send()
@@ -578,8 +585,22 @@ impl Api {
         note: &'a str,
         user_id: &'a str,
         payment_type: PaymentType,
-    ) -> Result<(), ApiError> {
-        if let Err(_) = self
+        funding_source_id: Option<&'a str>,
+    ) -> Result<PayRequestResponse, ApiError> {
+        let eligibility_token = if payment_type == PaymentType::Pay {
+            let eligibility = self
+                .fetch_eligibility(amount_in_cents, note, user_id)
+                .await?;
+            if eligibility.eligibile && eligibility.eligibility_token.is_some() {
+                eligibility.eligibility_token
+            } else {
+                return Err(ApiError::PaymentSendFailure("Not eligibile.".to_string()));
+            }
+        } else {
+            None
+        };
+
+        let resp = self
             .client
             .post("https://account.venmo.com/api/payments")
             .header("content-type", "application/json")
@@ -591,13 +612,176 @@ impl Api {
                 note,
                 target_user_details: TargetUserDetails { user_id },
                 payment_type,
+                // TODO: fill in for paay
+                eligibility_token,
+                funding_source_id,
+            })
+            .send()
+            .await;
+
+        let parsed = match resp {
+            Ok(r) => r
+                .json::<PayRequestResponse>()
+                .await
+                .expect("failed to parse"),
+            Err(e) => {
+                return Err(ApiError::PaymentSendFailure(e.to_string()));
+            }
+        };
+
+        Ok(parsed)
+    }
+
+    pub async fn fetch_eligibility<'a>(
+        &mut self,
+        amount_in_cents: u32,
+        note: &'a str,
+        user_id: &'a str,
+    ) -> Result<Eligibility, ApiError> {
+        let eligibility = match self
+            .client
+            .post("https://account.venmo.com/api/payments")
+            .header("content-type", "application/json")
+            .header("csrf-token", &self.csrf)
+            .header("xsrf-token", &self.csrf)
+            .json(&EligibilityQuery {
+                action: "pay",
+                amount_in_cents,
+                note,
+                target_id: user_id,
+                target_type: "user_id",
             })
             .send()
             .await
         {
-            return Err(ApiError::PaymentSendFailure("oops!".to_string()));
-        }
+            Ok(r) => {
+                let as_parsed = r.json::<Eligibility>().await;
+                if let Err(e) = as_parsed {
+                    return Err(ApiError::PaymentSendFailure(e.to_string()));
+                }
+                as_parsed.unwrap()
+            }
+            Err(e) => {
+                return Err(ApiError::PaymentSendFailure(e.to_string()));
+            }
+        };
 
-        Ok(())
+        Ok(eligibility)
+    }
+
+    pub async fn get_funding_instruments(&mut self) -> Result<Vec<FundingInstrument>, ApiError> {
+        let q = r#"
+        query getUserFundingInstruments {
+            profile {
+              ... on Profile {
+                identity {
+                  ... on Identity {
+                    capabilities
+                    __typename
+                  }
+                  __typename
+                }
+                wallet {
+                  id
+                  assets {
+                    logoThumbnail
+                    __typename
+                  }
+                  instrumentType
+                  name
+                  fees {
+                    feeType
+                    fixedAmount
+                    variablePercentage
+                    __typename
+                  }
+                  metadata {
+                    ...BalanceMetadata
+                    ... on BankFundingInstrumentMetadata {
+                      bankName
+                      isVerified
+                      lastFourDigits
+                      uniqueIdentifier
+                      __typename
+                    }
+                    ... on CardFundingInstrumentMetadata {
+                      issuerName
+                      lastFourDigits
+                      networkName
+                      isVenmoCard
+                      expirationDate
+                      expirationStatus
+                      quasiCash
+                      __typename
+                    }
+                    __typename
+                  }
+                  roles {
+                    merchantPayments
+                    peerPayments
+                    __typename
+                  }
+                  __typename
+                }
+                __typename
+              }
+              __typename
+            }
+          }
+          fragment BalanceMetadata on BalanceFundingInstrumentMetadata {
+            availableBalance {
+              value
+              transactionType
+              displayString
+              __typename
+            }
+            __typename
+          }          
+        "#;
+
+        let id = match self
+            .client
+            .post("https://api.venmo.com/graphql")
+            .header("Host", "api.venmo.com")
+            .header("accept", "*/*")
+            .header("content-type", "application/json")
+            .bearer_auth(&self.bearer)
+            .json(&GqlQuery {
+                operation_name: "getUserFundingInstruments",
+                variables: None,
+                query: q,
+            })
+            .send()
+            .await
+        {
+            Err(e) => {
+                return Err(ApiError::UserQueryFailure(e.to_string()));
+            }
+            Ok(resp) => {
+                let parsed = resp.json::<serde_json::Value>().await;
+
+                if let Err(e) = parsed {
+                    return Err(ApiError::UserQueryFailure(e.to_string()));
+                }
+
+                let parsed = parsed.unwrap();
+                let instruments = parsed["data"]["profile"]["wallet"].as_array().unwrap();
+
+                let parsed_instruments = instruments
+                    .into_iter()
+                    .filter_map(|i| {
+                        let i_parsed = serde_json::from_value::<FundingInstrument>(i.clone());
+                        if i_parsed.is_err() {
+                            return None;
+                        }
+                        Some(i_parsed.unwrap())
+                    })
+                    .collect::<Vec<_>>();
+
+                parsed_instruments
+            }
+        };
+
+        Ok(id)
     }
 }
