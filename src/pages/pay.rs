@@ -5,15 +5,15 @@ use tui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Text,
-    widgets::{Block, Borders, Clear, Paragraph},
+    text::{Spans, Text},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
 use tui_textarea::{Input, Key, TextArea};
 
 use crate::{api::Api, types::FundingInstrument};
 
-use super::{activate, centered_rect, inactivate, Page};
+use super::{activate, centered_rect, home::StatefulList, inactivate, Page};
 
 #[derive(Copy, Clone, PartialEq)]
 enum Field {
@@ -25,16 +25,29 @@ enum Field {
     Request,
 }
 
+struct PaymentSourcePopup {
+    items: StatefulList<FundingInstrument>,
+}
+
+impl PaymentSourcePopup {
+    fn new(sources: Vec<FundingInstrument>) -> PaymentSourcePopup {
+        PaymentSourcePopup {
+            items: StatefulList::with_items(sources),
+        }
+    }
+}
+
 pub struct PayPage<'a> {
     selected: Field,
     waiting_for_submit: bool,
     show_popup: bool,
+    popup_items: Vec<ListItem<'a>>,
     amount: TextArea<'a>,
     handle: TextArea<'a>,
     note: TextArea<'a>,
     send: Paragraph<'a>,
     recv: Paragraph<'a>,
-    funding_instruments: Vec<FundingInstrument>,
+    popup: PaymentSourcePopup,
     api: &'a mut Api,
 }
 
@@ -47,9 +60,10 @@ impl<'a> PayPage<'a> {
             note: TextArea::default(),
             send: Paragraph::new(Text::from("Pay")).alignment(Alignment::Right),
             recv: Paragraph::new(Text::from("Request")).alignment(Alignment::Left),
-            funding_instruments: vec![],
+            popup: PaymentSourcePopup::new(vec![]),
             waiting_for_submit: false,
             show_popup: false,
+            popup_items: vec![],
             selected: Field::Unset,
         };
 
@@ -100,19 +114,48 @@ impl<'a> PayPage<'a> {
         f: &mut Frame<'_, CrosstermBackend<StdoutLock<'_>>>,
         area: Rect,
     ) {
-        let block = Block::default()
-            .title("Funding Source")
-            .borders(Borders::ALL)
-            .style(Style::default().bg(Color::White));
-        let area = centered_rect(20, 40, area);
+        let block = Block::default().style(Style::default().bg(Color::White));
+        let area = centered_rect(40, 60, area);
         f.render_widget(Clear, area); //this clears out the background
         f.render_widget(block, area);
+        let list = List::new(self.popup_items.clone())
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Funding Source")
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            );
+        f.render_stateful_widget(list, area, &mut self.popup.items.state);
     }
 }
 
 #[async_trait]
 impl<'a> Page for PayPage<'a> {
     async fn on_input_event(&mut self, event: Input) -> bool {
+        if self.show_popup {
+            match event {
+                Input { key: Key::Down, .. } => {
+                    self.popup.items.next();
+                }
+                Input { key: Key::Up, .. } => {
+                    self.popup.items.previous();
+                }
+                Input { key: Key::Esc, .. } => {
+                    // reset selection if re-opened
+                    self.popup.items.state.select(Some(0));
+                    self.show_popup = false;
+                }
+                _ => {}
+            }
+
+            return false;
+        }
+
         match event {
             Input { key: Key::Down, .. } => {
                 self.selected = match self.selected {
@@ -123,7 +166,6 @@ impl<'a> Page for PayPage<'a> {
                     }
                     Field::Handle => {
                         inactivate(&mut self.handle);
-                        self.validate_username().await;
                         activate(&mut self.note);
                         Field::Note
                     }
@@ -143,7 +185,6 @@ impl<'a> Page for PayPage<'a> {
                 self.selected = match self.selected {
                     Field::Handle => {
                         inactivate(&mut self.handle);
-                        self.validate_username().await;
                         activate(&mut self.amount);
                         Field::Amount
                     }
@@ -219,8 +260,23 @@ impl<'a> Page for PayPage<'a> {
                 }
 
                 if self.selected == Field::Pay {
-                    self.funding_instruments =
-                        self.api.get_funding_instruments().await.expect(":(");
+                    self.popup.items.items = self.api.get_funding_instruments().await.expect(":(");
+                    self.popup_items = self
+                        .popup
+                        .items
+                        .items
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| {
+                            ListItem::new(Spans::from(format!(
+                                "{}. {} ({})",
+                                i + 1,
+                                v.name.clone(),
+                                v.instrument_type.clone()
+                            )))
+                            .style(Style::default().fg(Color::Black))
+                        })
+                        .collect();
                     self.show_popup = true;
                 }
 
@@ -232,7 +288,6 @@ impl<'a> Page for PayPage<'a> {
                     }
                     Field::Handle => {
                         inactivate(&mut self.handle);
-                        self.validate_username().await;
                         activate(&mut self.note);
                         Field::Note
                     }
@@ -240,18 +295,7 @@ impl<'a> Page for PayPage<'a> {
                     f => f,
                 }
             }
-            Input { key: Key::Esc, .. } => match self.selected {
-                Field::Pay => {
-                    if self.show_popup {
-                        self.show_popup = false;
-                    } else {
-                        return true;
-                    }
-                }
-                _ => {
-                    return true;
-                }
-            },
+            Input { key: Key::Esc, .. } => return true,
             k => match self.selected {
                 Field::Amount => {
                     self.amount.input(k.clone());

@@ -140,15 +140,15 @@ pub struct PayRequestResponse {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct FundingInstrument {
     pub id: String,
     pub name: String,
+    pub instrument_type: String,
 }
-
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Eligibility {
     pub eligibile: bool,
     pub eligibility_token: Option<String>,
 }
-

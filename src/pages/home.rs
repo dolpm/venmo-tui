@@ -14,13 +14,13 @@ use crate::{api::Api, types::LoginResponse};
 
 use super::{me::MePage, stories::StoriesPage, Page, ASCII_TITLE};
 
-struct StatefulList<T> {
-    state: ListState,
-    items: Vec<T>,
+pub struct StatefulList<T> {
+    pub state: ListState,
+    pub items: Vec<T>,
 }
 
 impl<T> StatefulList<T> {
-    fn with_items(items: Vec<T>) -> StatefulList<T> {
+    pub fn with_items(items: Vec<T>) -> StatefulList<T> {
         StatefulList {
             state: {
                 let mut s = ListState::default();
@@ -31,7 +31,7 @@ impl<T> StatefulList<T> {
         }
     }
 
-    fn next(&mut self) {
+    pub fn next(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
                 if i >= self.items.len() - 1 {
@@ -46,7 +46,7 @@ impl<T> StatefulList<T> {
         self.state.select(Some(i));
     }
 
-    fn previous(&mut self) {
+    pub fn previous(&mut self) {
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -61,6 +61,7 @@ impl<T> StatefulList<T> {
     }
 }
 
+#[derive(PartialEq)]
 enum CurrentPage {
     Home,
     Transactions,
@@ -194,7 +195,11 @@ pub async fn draw_home_page(
                 Input {
                     key: Key::Right, ..
                 } => {
-                    focused_area = FocusedArea::MainWindow;
+                    if let Some(selected) = side_bar.items.state.selected() {
+                        if side_bar.items.items[selected].1 != CurrentPage::Logout {
+                            focused_area = FocusedArea::MainWindow;
+                        }
+                    }
                 }
                 Input {
                     key: Key::Enter, ..
