@@ -135,7 +135,6 @@ pub enum PayRequestResponseStatus {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct PayRequestResponse {
-    pub balance: String,
     pub status: PayRequestResponseStatus,
 }
 
@@ -148,7 +147,8 @@ pub struct FundingInstrument {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Eligibility {
-    pub eligibile: bool,
+    pub eligible: bool,
     pub eligibility_token: Option<String>,
 }

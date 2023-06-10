@@ -591,7 +591,7 @@ impl Api {
             let eligibility = self
                 .fetch_eligibility(amount_in_cents, note, user_id)
                 .await?;
-            if eligibility.eligibile && eligibility.eligibility_token.is_some() {
+            if eligibility.eligible && eligibility.eligibility_token.is_some() {
                 eligibility.eligibility_token
             } else {
                 return Err(ApiError::PaymentSendFailure("Not eligibile.".to_string()));
@@ -612,7 +612,6 @@ impl Api {
                 note,
                 target_user_details: TargetUserDetails { user_id },
                 payment_type,
-                // TODO: fill in for paay
                 eligibility_token,
                 funding_source_id,
             })
@@ -640,7 +639,7 @@ impl Api {
     ) -> Result<Eligibility, ApiError> {
         let eligibility = match self
             .client
-            .post("https://account.venmo.com/api/payments")
+            .post("https://account.venmo.com/api/eligibility")
             .header("content-type", "application/json")
             .header("csrf-token", &self.csrf)
             .header("xsrf-token", &self.csrf)

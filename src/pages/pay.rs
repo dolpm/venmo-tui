@@ -6,7 +6,7 @@ use tui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Spans, Text},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
 use tui_textarea::{Input, Key, TextArea};
@@ -149,6 +149,11 @@ impl<'a> Page for PayPage<'a> {
                     // reset selection if re-opened
                     self.popup.items.state.select(Some(0));
                     self.show_popup = false;
+                }
+                Input {
+                    key: Key::Enter, ..
+                } => {
+                    self.waiting_for_submit = true;
                 }
                 _ => {}
             }
@@ -332,8 +337,6 @@ impl<'a> Page for PayPage<'a> {
                 .await
                 .expect("don't fail rn");
 
-            let instrument = None;
-
             self.api
                 .submit_payment(
                     amount_in_cents,
@@ -344,7 +347,13 @@ impl<'a> Page for PayPage<'a> {
                         Field::Request => crate::api::PaymentType::Request,
                         _ => panic!("not possible!"),
                     },
-                    instrument,
+                    match self.selected {
+                        Field::Pay => Some(
+                            &self.popup.items.items[self.popup.items.state.selected().unwrap()].id,
+                        ),
+                        Field::Request => None,
+                        _ => panic!("not possible@"),
+                    },
                 )
                 .await
                 .expect("don't fail rn");
