@@ -26,26 +26,26 @@ struct LoginQuery<'a> {
     is_group: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Audience {
     Private,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetUserDetails<'a> {
     user_id: &'a str,
 }
 
-#[derive(Serialize, PartialEq)]
+#[derive(Serialize, PartialEq, Debug, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum PaymentType {
     Pay,
     Request,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentQuery<'a> {
     amount_in_cents: u32,

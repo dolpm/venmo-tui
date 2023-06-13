@@ -67,6 +67,8 @@ impl<'a> StoriesPage<'a> {
             .append(&mut Self::create_table_rows(stories_data.stories));
 
         self.items.push(vec!["Load more :)".to_string()]);
+
+        self.last = Some(stories_data.next_id);
     }
 
     pub fn next(&mut self) {

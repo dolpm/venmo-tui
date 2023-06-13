@@ -16,6 +16,7 @@ pub mod me;
 pub mod pay;
 pub mod qr;
 pub mod stories;
+pub mod error;
 
 const ASCII_TITLE: &'static str = r#"
  __      __                        
